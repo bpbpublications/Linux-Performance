@@ -1,0 +1,1608 @@
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page number 43
+Topic: Creating custom plugins: dstat plugins are Python scripts placed in /usr/share/dstat/ or ~/.dstat/:
+--------------------------------------------------------------------------
+
+# Example custom plugin: ~/.dstat/dstat_example.py
+class dstat_plugin(dstat):
+    """
+    Example plugin to demonstrate custom metric collection.
+    """
+    def __init__(self):
+        self.name = 'example'
+        self.vars = ('metric1', 'metric2')
+        self.type = 'f'
+        self.width = 8
+        self.scale = 1000
+    
+    def extract(self):
+        # Collect metrics here
+        self.val['metric1'] = 42
+        self.val['metric2'] = 123
+
+-------------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 45
+Topic -- Security and auditing applications:
+
+-------------------------------------------------------------------------
+
+# List all processes with open network connections
+for pid in $(ps -eo pid); do 
+  if [ -d /proc/$pid ]; then 
+    netstat=$(grep -l 'TCP\|UDP' /proc/$pid/net/tcp /proc/$pid/net/udp 2>/dev/null);
+    if [ -n "$netstat" ]; then 
+      ps -p $pid -o pid,user,cmd --no-headers; 
+    fi; 
+  fi; 
+done
+
+------------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 47
+
+Topic: Process Resource Limits Analysis:
+
+------------------------------------------------------------------------
+
+# Show process limits (requires prlimit command from util-linux)
+for pid in $(pgrep java); do 
+  echo "Process $pid:"; 
+  prlimit -p $pid | grep -E 'STACK|DATA|RSS'; 
+done
+
+------------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 48
+
+Topic: Resource usage analysis by process tree:
+
+-----------------------------------------------------------------------
+
+Resource Usage Analysis by Process Tree:
+# Create a function to show CPU usage by process tree
+pstree_cpu() {
+  local pid=$1
+  local indent=$2
+  local cmd=$(ps -o cmd= -p $pid 2>/dev/null)
+  local cpu=$(ps -o %cpu= -p $pid 2>/dev/null)
+  if [ -n "$cmd" ]; then
+    printf "%s%s (PID %s, CPU %s%%)\n" "$indent" "$cmd" "$pid" "$cpu"
+    for child in $(pgrep -P $pid); do
+      pstree_cpu $child "$indent  "
+    done
+  fi
+}
+pstree_cpu 1 ""
+Script Integration for Complex Operations:
+# Restart all processes matching a pattern but only if they're running
+for pid in $(pgrep myapp); do
+  systemd-analyze blame | grep -q $pid && \
+  systemctl restart $(systemctl status $pid | grep -oP '●\s\K\S+')
+done
+
+
+-------------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 50
+
+Topic: Filtering by Resource Usage:
+
+------------------------------------------------------------------------
+
+# Create a bash function to find high CPU processes
+find_high_cpu() {
+  threshold=${1:-50}  # Default threshold of 50%
+  for pid in $(pgrep -d' ' ".*"); do
+    cpu=$(ps -p $pid -o %cpu --no-headers | tr -d ' ')
+    if (( $(echo "$cpu > $threshold" | bc -l) )); then
+      ps -p $pid -o pid,%cpu,cmd
+    fi
+  done
+}
+find_high_cpu 75  # Find processes using >75% CPU
+
+
+-----------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 52
+Topic: Performance Troubleshooting Examples:
+
+------------------------------------------------------------------------
+
+# Find processes with too many open files (approaching ulimit)
+for pid in $(ps -eo pid --no-headers); do
+  count=$(lsof -p $pid 2>/dev/null | wc -l)
+  if [ "$count" -gt 500 ]; then
+    echo "PID $pid ($(ps -p $pid -o comm=)) has $count open files"
+  fi
+done
+
+---------------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+Page Number 60
+Topic: Performance dashboard example:
+---------------------------------------------------------------------------
+
+Performance Dashboard Example:
+{
+  "dashboard": {
+    "id": null,
+    "title": "Linux Performance Dashboard",
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "CPU Usage",
+        "type": "graph",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+            "legendFormat": "CPU Usage %"
+          }
+        ]
+      },
+      {
+        "title": "Memory Usage",
+        "type": "graph",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "100 - ((node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100)",
+            "legendFormat": "Memory Usage %"
+          }
+        ]
+      },
+      {
+        "title": "Disk I/O",
+        "type": "graph",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "rate(node_disk_read_bytes_total[5m])",
+            "legendFormat": "Read {{device}}"
+          },
+          {
+            "expr": "rate(node_disk_written_bytes_total[5m])",
+            "legendFormat": "Write {{device}}"
+          }
+        ]
+      },
+      {
+        "title": "Network I/O",
+        "type": "graph",
+        "datasource": "Prometheus",
+        "targets": [
+          {
+            "expr": "rate(node_network_receive_bytes_total[5m])",
+            "legendFormat": "Receive {{device}}"
+          },
+          {
+            "expr": "rate(node_network_transmit_bytes_total[5m])",
+            "legendFormat": "Transmit {{device}}"
+          }
+        ]
+      }
+    ]
+  }
+}
+
+
+-----------------------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 55
+
+Topic:One-liners for Common Analyses: (Note the below 6 functions are all in the same page)
+
+-------------------------------------------------------------------------------------
+
+# CPU usage distribution by process
+bpftrace -e 'profile:hz:99 { @[comm] = count(); }'
+
+------------------------------
+
+# Disk I/O latency distribution
+bpftrace -e 'tracepoint:block:block_rq_complete { @usecs = hist((nsecs - args->__data_loc) / 1000); }'
+
+-------------------------------
+
+# Count system calls by process
+bpftrace -e 'tracepoint:raw_syscalls:sys_enter { @[comm, pid] = count(); }'
+
+-------------------------------
+
+Function Tracing:
+# Trace calls to a specific kernel function
+bpftrace -e 'kprobe:ip_route_input_noref { printf("pid: %d, comm: %s\n", pid, comm); }'
+
+--------------------------------
+
+# Trace user-space function calls
+bpftrace -e 'uprobe:/usr/bin/bash:readline { printf("bash readline() called by %s\n", comm); }'
+
+--------------------------------
+
+# Trace function entry and return values
+bpftrace -e 'kprobe:do_sys_open { printf("opening: %s\n", str(arg1)); } kretprobe:do_sys_open printf("return: %d\n", retval); }'
+
+
+
+
+
+
+
+
+----------------------------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 55
+
+Topic: Performance Analysis Scripts:
+
+------------------------------------------------------------------------------------------
+
+# File: disk_latency.bt
+#!/usr/bin/env bpftrace
+
+
+BEGIN {
+    printf("Tracing block device I/O latency... Hit Ctrl-C to end.\n");
+}
+
+
+tracepoint:block:block_rq_issue {
+    @start[args->dev, args->sector] = nsecs;
+}
+
+
+tracepoint:block:block_rq_complete {
+    $dev = args->dev;
+    $sector = args->sector;
+    $latency = nsecs - @start[$dev, $sector];
+    
+    if ($latency > 0) {
+        @latency_us = hist($latency / 1000);
+        @avg_latency_us = avg($latency / 1000);
+        @max_latency_us = max($latency / 1000);
+    }
+    delete(@start[$dev, $sector]);
+}
+
+
+END {
+    printf("I/O latency histogram (microseconds):\n");
+    print(@latency_us);
+    printf("Average I/O latency: %.2f μs\n", @avg_latency_us);
+    printf("Maximum I/O latency: %.2f μs\n", @max_latency_us);
+}
+
+------------------------------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 56
+
+Topic: Advanced Filtering and Conditions:
+-----------------------------------------------------------------------------------------
+
+# Trace slow file opens (>1ms)
+bpftrace -e 'kprobe:do_sys_open { @start[tid] = nsecs; } kretprobe:do_sys_open /@start[tid]/ { $duration = nsecs - @start[tid]; if ($duration > 1000000) { printf("slow open %d ms by %s: %s\n", $duration / 1000000, comm, str(arg1)); } delete(@start[tid]); }'
+-------------------------------------------------------------------------------------------
+
+# Count page faults by process, but only for specific processes
+bpftrace -e 'software:faults:1 /comm == "postgres" || comm == "mysql"/ { @[comm] = count(); }'
+
+--------------------------------------------------------------------------------------------
+
+Stack Trace Collection:
+
+# Collect stack traces when a function is called
+bpftrace -e 'kprobe:ip_route_input_noref { @[kstack] = count(); }'
+
+
+
+# Combined user and kernel stack traces
+bpftrace -e 'profile:hz:99 { @[ustack, kstack] = count(); }'
+
+------------------------------------------------------------------------------------------
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 56
+
+Tpoic: Custom Data Structures:
+------------------------------------------------------------------------------------------
+
+# File: tcp_retransmits.bt
+#!/usr/bin/env bpftrace
+
+
+#include <linux/socket.h>
+#include <net/sock.h>
+
+
+BEGIN {
+    printf("Tracing TCP retransmissions... Hit Ctrl-C to end.\n");
+}
+
+
+kprobe:tcp_retransmit_skb {
+    $sk = (struct sock *)arg0;
+    $daddr = ntop($sk->__sk_common.skc_daddr);
+    $dport = $sk->__sk_common.skc_dport;
+    
+    // Convert port from network to host byte order
+    $dport = (($dport & 0xFF) << 8) | ($dport >> 8);
+    
+    @retransmits[$daddr, $dport, comm] = count();
+}
+
+
+interval:s:5 {
+    time("%H:%M:%S\n");
+    print(@retransmits);
+    clear(@retransmits);
+}
+
+---------------------------------------------------------------------------------------------
+
+Chapter 4 Essential Linux Performance Metrics and Measurement
+
+Page Number 57
+
+Topic: Application Performance Monitoring:
+---------------------------------------------------------------------------------------------
+
+# Monitor HTTP request latency for nginx
+bpftrace -e 'uprobe:/usr/sbin/nginx:ngx_http_handler { @req[tid] = nsecs; } uretprobe:/usr/sbin/nginx:ngx_http_handler /@req[tid]/ { @latency = hist((nsecs - @req[tid]) / 1000000); delete(@req[tid]); }'
+
+-----------------------------------------------------------------------------------------
+Chapter 7 Disk and I/O Performance
+
+Page Number: 123
+
+Automated analysis scripts:
+
+-----------------------------------------------------------------------------------------
+
+#!/bin/bash
+# Disk I/O Utilization Monitor (Auto-detects disks)
+# Logs if any disk is over 90% utilization
+
+
+LOGFILE="/var/log/disk_alert.log"
+THRESHOLD=90
+
+
+# Detect all disks (ignores loop devices, RAM disks, partitions)
+DISKS=$(lsblk -ndo NAME,TYPE | awk '$2=="disk"{print $1}')
+
+
+while true; do
+    for DISK in $DISKS; do
+        UTIL=$(iostat -x "$DISK" 1 2 | tail -n 1 | awk '{print $NF}')
+        
+        # If UTIL is numeric and above threshold
+        if [[ $UTIL =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            if awk -v util="$UTIL" -v thr="$THRESHOLD" 'BEGIN {exit !(util > thr)}'; then
+                {
+                    echo "[$(date)] High disk utilization detected on /dev/$DISK: ${UTIL}%"
+                    iostat -x "$DISK" 1 3
+                    iotop -b -n 1 -o
+                    echo "----------------------------------------"
+                } >> "$LOGFILE"
+            fi
+        fi
+    done
+    sleep 10
+done
+
+---------------------------------------------------------------------------------------------
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number: 160
+
+Topic: Single-Purpose Monitors:
+
+--------------------------------------------------------------------------------------------
+
+# Monitor CPU utilization using /proc/stat
+function cpu_usage() {
+  local prev_total=0 prev_idle=0
+  while true; do
+    local cpu=($(head -n1 /proc/stat))
+    local user=${cpu[1]} nice=${cpu[2]} system=${cpu[3]} idle=${cpu[4]} iowait=${cpu[5]} irq=${cpu[6]} softirq=${cpu[7]}
+    local total=$((user + nice + system + idle + iowait + irq + softirq))
+    local diff_total=$((total - prev_total))
+    local diff_idle=$((idle - prev_idle))
+    local utilization=$(( 100 * (diff_total - diff_idle) / diff_total ))
+    echo "CPU utilization: $utilization%"
+    prev_total=$total
+    prev_idle=$idle
+    sleep 1
+  done
+}
+
+--------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number: 160
+
+Topic: Comprehensive System Monitoring:
+
+function system_monitor() {
+  # Memory utilization
+  local mem=($(grep -E 'MemTotal|MemFree|Buffers|Cached' /proc/meminfo | awk '{print $2}'))
+  local mem_total=${mem[0]} mem_free=${mem[1]} buffers=${mem[2]} cached=${mem[3]}
+  local mem_used=$((mem_total - mem_free - buffers - cached))
+  local mem_percent=$((mem_used * 100 / mem_total))
+  
+  # CPU load
+  local load=$(cut -d ' ' -f 1-3 /proc/loadavg)
+  
+  # Disk utilization
+  local disk_stats=$(grep 'sda ' /proc/diskstats)
+  
+  echo "Memory: $mem_percent% | Load: $load | Disk: $disk_stats"
+}
+
+-------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number: 160
+
+Topic: Process-Specific Monitoring:
+
+------------------------------------------------------------------------------------------
+
+function monitor_process() {
+  local pid=$1
+  local comm=$(cat /proc/$pid/comm 2>/dev/null)
+  if [[ -z "$comm" ]]; then
+    echo "Process $pid not found"
+    return 1
+  fi
+  
+  # Memory usage
+  local mem=$(grep -E 'VmRSS' /proc/$pid/status | awk '{print $2}')
+  
+  # CPU usage (needs two samples)
+  local cpu1=$(grep -E '^cpu ' /proc/stat)
+  local proc1=$(cut -d' ' -f 14- /proc/$pid/stat)
+  sleep 1
+  local cpu2=$(grep -E '^cpu ' /proc/stat)
+  local proc2=$(cut -d' ' -f 14- /proc/$pid/stat)
+  
+  # Calculate CPU percentage (simplified)
+  # In a real monitor, you'd parse the values and calculate properly
+  
+  echo "Process $pid ($comm): Memory: ${mem}kB"
+}
+
+--------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number: 161
+Topic: Hardware Monitoring:
+
+---------------------------------------------------------------------------------------------
+function hardware_monitor() {
+  # CPU frequencies
+  local freqs=$(cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq 2>/dev/null)
+  
+  # CPU temperatures
+  local temps=$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null)
+  
+  # Network traffic
+  local net_rx=$(cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null)
+  local net_tx=$(cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null)
+  
+  echo "CPU Frequencies: $freqs MHz | Temperatures: $temps mC | Network: RX $net_rx bytes, TX $net_tx bytes"
+}
+
+----------------------------------------------------------------------------------------------
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number: 163
+
+Topic: SystemTap
+
+----------------------------------------------------------------------------------------------
+
+# Count system calls by process
+probe begin {
+  printf("Counting system calls...\n")
+}
+
+
+global syscalls
+
+
+probe syscall.* {
+  syscalls[pid(), execname()]++
+}
+
+
+probe timer.s(5) {
+  printf("%-10s %-15s %-10s\n", "PID", "PROCESS", "SYSCALLS")
+  foreach ([p, e] in syscalls-) {
+    printf("%-10d %-15s %-10d\n", p, e, syscalls[p, e])
+  }
+  delete syscalls
+}
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number 164
+
+Topic: eBPF and BCC (BPF Compiler Collection)
+
+----------------------------------------------------------------------------------------------
+
+# BCC Python script to trace block I/O latency
+from bcc import BPF
+
+
+# BPF program
+bpf_text = """
+#include <uapi/linux/ptrace.h>
+#include <linux/blkdev.h>
+
+
+BPF_HASH(start, struct request *);
+BPF_HISTOGRAM(dist);
+
+
+void trace_start(struct pt_regs *ctx, struct request *req) {
+    // Record start time
+    u64 ts = bpf_ktime_get_ns();
+    start.update(&req, &ts);
+}
+
+
+void trace_completion(struct pt_regs *ctx, struct request *req) {
+    u64 *tsp, delta;
+    
+    // Fetch start time and calculate delta
+    tsp = start.lookup(&req);
+    if (tsp != 0) {
+        delta = bpf_ktime_get_ns() - *tsp;
+        dist.increment(bpf_log2l(delta / 1000));
+        start.delete(&req);
+    }
+}
+"""
+
+
+b = BPF(text=bpf_text)
+b.attach_kprobe(event="blk_start_request", fn_name="trace_start")
+b.attach_kprobe(event="blk_mq_start_request", fn_name="trace_start")
+b.attach_kretprobe(event="blk_account_io_completion", fn_name="trace_completion")
+
+
+print("Tracing block I/O... Hit Ctrl-C to end.")
+
+
+try:
+    sleep(99999)
+except KeyboardInterrupt:
+    print("\n\nBlock I/O latency histogram (microseconds):")
+    b["dist"].print_log2_hist("usecs")
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number 165
+
+Topic: Practical Kprobe and Uprobe Examples
+
+Example 1: Tracking File Open Latency with kprobes
+----------------------------------------------------------------------------------------------
+# Using perf to measure time spent in do_sys_open
+perf probe --add 'do_sys_open'
+perf probe --add 'do_sys_open%return'
+perf record -e probe:do_sys_open -e probe:do_sys_open__return -a sleep 10
+perf script
+
+---------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number 165
+
+Topic: Practical Kprobe and Uprobe Examples
+
+A more sophisticated approach using SystemTap:
+
+---------------------------------------------------------------------------------------------
+global start_times
+
+probe kernel.function("do_sys_open") {
+  start_times[tid()] = gettimeofday_us()
+}
+
+
+probe kernel.function("do_sys_open").return {
+  end_time = gettimeofday_us()
+  start_time = start_times[tid()]
+  
+  if (start_time) {
+    duration = end_time - start_time
+    printf("PID %d (%s) opened file in %d μs\n", 
+           pid(), execname(), duration)
+    delete start_times[tid()]
+  }
+}
+
+----------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number 166
+Example 2: Tracing Memory Allocations with uprobes
+Using BCC to track malloc() and free() calls:
+
+--------------------------------------------------------------------------------------------
+
+from bcc import BPF
+from time import sleep
+
+
+# BPF program
+bpf_text = """
+#include <uapi/linux/ptrace.h>
+
+
+struct alloc_info_t {
+    u64 size;    // Requested allocation size
+    u64 timestamp;  // Timestamp of allocation
+};
+
+
+BPF_HASH(allocs, u64, struct alloc_info_t);
+BPF_HISTOGRAM(size_hist);
+
+
+int trace_malloc(struct pt_regs *ctx) {
+    u64 size = PT_REGS_PARM1(ctx);
+    u64 timestamp = bpf_ktime_get_ns();
+    u64 addr = PT_REGS_RC(ctx);
+    
+    if (addr != 0) {
+        struct alloc_info_t info = {.size = size, .timestamp = timestamp};
+        allocs.update(&addr, &info);
+        
+        // Update size histogram
+        size_hist.increment(bpf_log2l(size));
+    }
+    
+    return 0;
+}
+
+
+int trace_free(struct pt_regs *ctx) {
+    u64 addr = PT_REGS_PARM1(ctx);
+    struct alloc_info_t *info = allocs.lookup(&addr);
+    
+    if (info != 0) {
+        u64 current = bpf_ktime_get_ns();
+        u64 lifetime = (current - info->timestamp) / 1000000; // ms
+        
+        bpf_trace_printk("freed %lu bytes allocated at %lx after %lu ms\\n", 
+                         info->size, addr, lifetime);
+        allocs.delete(&addr);
+    }
+    
+    return 0;
+}
+"""
+
+
+b = BPF(text=bpf_text)
+
+
+# Attach to libc malloc and free
+b.attach_uprobe(name="c", sym="malloc", fn_name="trace_malloc", retprobe=1)
+b.attach_uprobe(name="c", sym="free", fn_name="trace_free")
+
+
+print("Tracing malloc() and free() calls... Hit Ctrl-C to end.")
+
+
+# Print output
+try:
+    while True:
+        print(b.trace_fields())
+        sleep(0.1)
+except KeyboardInterrupt:
+    print("\n\nAllocation size histogram:")
+    b["size_hist"].print_log2_hist("bytes")
+
+
+---------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number 167
+
+Example 3: Tracking Disk I/O Stack Latency
+This example uses kprobes to trace the entire I/O path from system call to device driver:
+
+--------------------------------------------------------------------------------------------
+
+global start_time, vfs_time, block_time
+
+
+# Trace high-level file operations
+probe syscall.write {
+  if (pid() == target()) {
+    start_time[tid()] = gettimeofday_us()
+    printf("Write syscall: fd=%d, count=%d\n", fd, count)
+  }
+}
+
+
+# Trace VFS layer
+probe kernel.function("vfs_write") {
+  if (pid() == target()) {
+    vfs_time[tid()] = gettimeofday_us()
+  }
+}
+
+
+# Trace block layer queue insertion
+probe kernel.function("blk_mq_submit_bio") {
+  if (pid() == target()) {
+    block_time[tid()] = gettimeofday_us()
+  }
+}
+
+
+# Trace I/O completion
+probe kernel.function("bio_endio") {
+  if (start_time[tid()] != 0) {
+    end_time = gettimeofday_us()
+    
+    printf("I/O path times for PID %d:\n", pid())
+    printf("  Total time: %d μs\n", end_time - start_time[tid()])
+    printf("  Syscall to VFS: %d μs\n", vfs_time[tid()] - start_time[tid()])
+    printf("  VFS to block layer: %d μs\n", block_time[tid()] - vfs_time[tid()])
+    printf("  Block layer to completion: %d μs\n", end_time - block_time[tid()])
+    
+    delete start_time[tid()]
+    delete vfs_time[tid()]
+    delete block_time[tid()]
+  }
+}
+
+----------------------------------------------------------------------------------------------
+Chapter 9 Profiling Linux Kernel and Applications
+
+
+Page Number 169
+
+
+Topic: Advanced Probing Techniques
+Stack Traces and Function Graphs
+Capture the call stack when a probe is hit:
+
+
+---------------------------------------------------------------------------------------------
+
+# Record stack traces on probe hits with perf
+perf record -e probe:do_sys_open --call-graph dwarf
+With SystemTap:
+probe kernel.function("do_sys_open") {
+  printf("%s called from:\n", probefunc())
+  print_backtrace()
+}
+
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number 169
+
+Topic:Conditional Probing
+Only trigger handlers when specific conditions are met:
+
+-----------------------------------------------------------------------------------------------
+
+# Only trace when file size exceeds 1MB
+probe kernel.function("do_sys_open") {
+  if ($filename != NULL && $flags & O_CREAT && $mode & 0666) {
+    printf("Creating file: %s\n", user_string($filename))
+  }
+}
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number 169
+
+Topic: Cross-Layer Correlation
+Correlate events across kernel subsystems:
+
+-----------------------------------------------------------------------------------------------
+
+# BCC program to correlate syscalls with block I/O
+from bcc import BPF
+
+
+bpf_text = """
+#include <uapi/linux/ptrace.h>
+#include <linux/blkdev.h>
+
+
+struct event_t {
+    u32 pid;
+    char comm[16];
+    char syscall[16];
+    char operation[8];
+    u64 latency;
+};
+
+
+BPF_HASH(start, u32);
+BPF_PERF_OUTPUT(events);
+
+
+int trace_read_entry(struct pt_regs *ctx) {
+    u64 ts = bpf_ktime_get_ns();
+    u32 pid = bpf_get_current_pid_tgid();
+    start.update(&pid, &ts);
+    return 0;
+}
+
+
+int trace_block_io(struct pt_regs *ctx) {
+    u32 pid = bpf_get_current_pid_tgid();
+    u64 *tsp = start.lookup(&pid);
+    
+    if (tsp != 0) {
+        struct event_t event = {};
+        event.pid = pid;
+        bpf_get_current_comm(&event.comm, sizeof(event.comm));
+        
+        u64 delta = bpf_ktime_get_ns() - *tsp;
+        event.latency = delta / 1000; // microseconds
+        
+        __builtin_memcpy(&event.syscall, "read", 5);
+        __builtin_memcpy(&event.operation, "disk", 5);
+        
+        events.perf_submit(ctx, &event, sizeof(event));
+    }
+    
+    return 0;
+}
+"""
+
+
+b = BPF(text=bpf_text)
+b.attach_kprobe(event="sys_read", fn_name="trace_read_entry")
+b.attach_kprobe(event="blk_account_io_start", fn_name="trace_block_io")
+
+
+# Process events
+def print_event(cpu, data, size):
+    event = b["events"].event(data)
+    print("PID: %d, Comm: %s, Syscall: %s → %s I/O, Latency: %d μs" % 
+          (event.pid, event.comm.decode(), event.syscall.decode(), 
+           event.operation.decode(), event.latency))
+
+
+b["events"].open_perf_buffer(print_event)
+print("Tracing... Hit Ctrl-C to end.")
+
+
+try:
+    while True:
+        b.perf_buffer_poll()
+except KeyboardInterrupt:
+    pass
+
+
+----------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number 176
+Create a performance monitoring script:
+
+---------------------------------------------------------------------------------------------
+
+#!/bin/bash
+# /usr/local/bin/performance-monitor
+
+
+while read line; do
+  # Extract syscall information
+  if echo "$line" | grep -q "syscall="; then
+    syscall=$(echo "$line" | sed -n 's/.*syscall=\([^ ]*\).*/\1/p')
+    pid=$(echo "$line" | sed -n 's/.*pid=\([0-9]*\).*/\1/p')
+    comm=$(echo "$line" | sed -n 's/.*comm="\([^"]*\)".*/\1/p')
+    
+    # Log high-impact syscalls to a separate file
+    if [[ "$syscall" == "read" || "$syscall" == "write" || "$syscall" == "open" ]]; then
+      echo "$(date +%s) $pid $comm $syscall" >> /var/log/performance/high_impact_syscalls.log
+    fi
+  fi
+done
+
+--------------------------------------------------------------------------------------------
+
+Chapter 9 Profiling Linux Kernel and Applications
+
+Page Number 178
+
+Topic: Custom Audit Event Processing
+
+---------------------------------------------------------------------------------------------
+
+#!/usr/bin/env python3
+import re
+import time
+import sqlite3
+
+
+# Connect to a database for storing processed events
+conn = sqlite3.connect('/var/lib/performance/audit_metrics.db')
+c = conn.cursor()
+
+
+# Create table if it doesn't exist
+c.execute('''
+CREATE TABLE IF NOT EXISTS syscall_metrics (
+    timestamp INTEGER,
+    syscall TEXT,
+    comm TEXT,
+    pid INTEGER,
+    count INTEGER
+)
+''')
+
+
+# Process audit log entries
+syscall_pattern = re.compile(r'syscall=(\w+)')
+comm_pattern = re.compile(r'comm="([^"]+)"')
+pid_pattern = re.compile(r'pid=(\d+)')
+
+
+syscall_counts = {}
+last_flush = time.time()
+
+
+with open('/var/log/audit/audit.log', 'r') as f:
+    # Seek to end of file
+    f.seek(0, 2)
+    
+    while True:
+        line = f.readline()
+        if not line:
+            time.sleep(0.1)
+            continue
+            
+        # Extract information from audit log entry
+        syscall_match = syscall_pattern.search(line)
+        comm_match = comm_pattern.search(line)
+        pid_match = pid_pattern.search(line)
+        
+        if syscall_match and comm_match and pid_match:
+            syscall = syscall_match.group(1)
+            comm = comm_match.group(1)
+            pid = int(pid_match.group(1))
+            
+            key = (syscall, comm, pid)
+            syscall_counts[key] = syscall_counts.get(key, 0) + 1
+            
+        # Flush counts to database every 60 seconds
+        now = time.time()
+        if now - last_flush >= 60:
+            timestamp = int(now)
+            
+            for (syscall, comm, pid), count in syscall_counts.items():
+                c.execute(
+                    'INSERT INTO syscall_metrics VALUES (?, ?, ?, ?, ?)',
+                    (timestamp, syscall, comm, pid, count)
+                )
+            
+            conn.commit()
+            syscall_counts.clear()
+            last_flush = now
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 12 Linux Tooling Landscape
+
+Page Number: 225
+
+Custom BCC Programs
+
+----------------------------------------------------------------------------------------------
+
+#!/usr/bin/python
+from bcc import BPF
+
+
+# BPF program
+bpf_text = """
+#include <uapi/linux/ptrace.h>
+
+
+BPF_HASH(count, u64);
+
+
+int do_count(struct pt_regs *ctx) {
+    u64 pid = bpf_get_current_pid_tgid();
+    count.increment(pid);
+    return 0;
+}
+"""
+
+
+# Load BPF program
+b = BPF(text=bpf_text)
+b.attach_kprobe(event="sys_read", fn_name="do_count")
+
+
+# Print output
+print("Tracing... Ctrl-C to end")
+try:
+    while True:
+        sleep(1)
+        for k, v in b["count"].items():
+            print("PID %d read calls: %d" % (k.value, v.value))
+except KeyboardInterrupt:
+    pass
+
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 12 Linux Tooling Landscape
+
+Page Number 228
+
+Topic: eBPF-based Solutions:
+
+-----------------------------------------------------------------------------------------------
+
+/* Simplified example of real-time profiling with ring buffer */
+SEC("perf_event")
+int profile(struct bpf_perf_event_data *ctx) {
+    /* Collect profiling data */
+    struct event data = {0};
+    data.pid = bpf_get_current_pid_tgid() >> 32;
+    bpf_get_current_comm(data.comm, sizeof(data.comm));
+    
+    /* Submit to ring buffer for real-time processing */
+    bpf_ringbuf_submit(&data, 0);
+    return 0;
+}
+
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 12 Linux Tooling Landscape
+
+Page Number 228
+Topic: Periodic Snapshot Collection:
+
+-----------------------------------------------------------------------------------------------
+
+# Shell script for periodic profile snapshots
+while true; do
+    perf record -p $PID -g -o /tmp/profile_$(date +%s).data -- sleep 10
+    perf script -i /tmp/profile_*.data | ./stackcollapse-perf.pl > /tmp/current.folded
+    ./flamegraph.pl /tmp/current.folded > /tmp/current.svg
+    # Process or analyze the current snapshot
+    sleep 50  # Total 60-second cycle
+done
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 12 Linux Tooling Landscape
+
+Page Number 228
+
+Topic: Metrics Integration:
+
+--------------------------------------------------------------------------------------------
+
+# Example sending profiling metrics to Prometheus
+from prometheus_client import Counter, start_http_server
+import time
+
+
+# Define metrics
+function_calls = Counter('app_function_calls', 'Function call count', ['function'])
+
+
+# Collect and export metrics
+start_http_server(8000)
+while True:
+    # Collect profiling data (e.g., from eBPF)
+    function_data = collect_profile_data()
+    
+    # Update Prometheus metrics
+    for func, count in function_data.items():
+        function_calls.labels(function=func).inc(count)
+    
+    time.sleep(10)
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 12 Linux Tooling Landscape
+
+Page Number 229
+
+Topic: Anomaly Detection:
+Implement automated analysis of profiling data:
+
+-----------------------------------------------------------------------------------------------
+
+# Simplified anomaly detection on profiling data
+def detect_anomalies(current_profile, baseline_profile):
+    # Compare current profile to baseline
+    for function, current_count in current_profile.items():
+        if function in baseline_profile:
+            baseline_count = baseline_profile[function]
+            if current_count > baseline_count * 1.5:  # 50% increase
+                alert_on_function(function, current_count, baseline_count)
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 12 Linux Tooling Landscape
+
+Page Number 229
+
+Topic: Visualization Pipeline:
+
+Generate real-time visualizations for human operators:
+
+-----------------------------------------------------------------------------------------------
+
+# Generate incremental flamegraphs
+function update_flamegraph() {
+    perf script | ./stackcollapse-perf.pl > current.folded
+    ./flamegraph.pl current.folded > current.svg
+    cp current.svg /var/www/html/flamegraph.svg  # Serve via web server
+}
+
+
+# Run in a loop
+while true; do
+    perf record -F 99 -p $PID -g -- sleep 10
+    update_flamegraph
+done
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 13 Benchmarking and Load Testing Essentials
+
+Page Number 261
+
+Topic: Bash-based Workload Generation
+Bash scripts can create simple but effective workload generators:
+
+-----------------------------------------------------------------------------------------------
+
+#!/bin/bash
+# Simple CPU load generator
+num_cores=$(nproc)
+duration=60
+
+
+echo "Generating load on $num_cores cores for $duration seconds..."
+
+
+for i in $(seq 1 $num_cores); do
+    # Start background process that performs heavy calculation
+    (
+        end_time=$((SECONDS + duration))
+        while [ $SECONDS -lt $end_time ]; do
+            # Calculate prime numbers as a CPU-intensive task
+            factor $RANDOM$RANDOM > /dev/null
+        done
+    ) &
+done
+
+
+# Wait for all background processes to complete
+wait
+echo "Load test completed."
+
+
+-----------------------------------------------------------------------------------------------
+
+Chapter 13 Benchmarking and Load Testing Essentials
+
+Page Number 262
+
+Topic: This script generates CPU load on all available cores for a specified duration.
+Python-based Load Generation
+Python offers more sophisticated control for custom workload generation:
+
+-----------------------------------------------------------------------------------------------
+
+import multiprocessing
+import time
+import random
+import os
+
+
+def cpu_load(duration, intensity):
+    """Generate CPU load at specified intensity (0-1)"""
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        # Adjust work/sleep ratio to match intensity
+        start_work = time.time()
+        # Compute-intensive operation
+        _ = [i**2 for i in range(10000)]
+        work_time = time.time() - start_work
+        # Sleep to achieve desired intensity
+        if work_time < 0.01:  # Prevent division by zero
+            time.sleep(0.01 * (1 - intensity) / intensity)
+        else:
+            sleep_time = work_time * (1 - intensity) / intensity
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+
+def memory_load(duration, memory_mb):
+    """Allocate and use specified memory amount"""
+    # Allocate memory
+    data = bytearray(memory_mb * 1024 * 1024)
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        # Randomly access and modify memory to prevent optimization
+        for _ in range(1000):
+            idx = random.randrange(0, len(data) - 1)
+            data[idx] = random.randint(0, 255)
+        time.sleep(0.1)
+
+
+
+----------------------------------------------------------------------------------------------
+
+Chapter 13 Benchmarking and Load Testing Essentials
+
+Page Number 262
+
+These functions demonstrate controlled CPU and memory load generation that can be incorporated into larger test frameworks.
+Custom I/O Workload Patterns
+For specialized I/O patterns:
+
+----------------------------------------------------------------------------------------------
+
+
+import os
+import time
+import random
+
+
+def io_pattern_generator(directory, file_count, file_size_mb, 
+                        read_pct=50, sequential_pct=50, duration=60):
+    """
+    Generate custom I/O patterns with controlled read/write ratio
+    and sequential/random access patterns
+    """
+    # Create test files if they don't exist
+    files = []
+    for i in range(file_count):
+        filename = os.path.join(directory, f"test_file_{i}.dat")
+        if not os.path.exists(filename):
+            with open(filename, 'wb') as f:
+                f.write(os.urandom(file_size_mb * 1024 * 1024))
+        files.append(filename)
+    
+    end_time = time.time() + duration
+    operations = 0
+    
+    while time.time() < end_time:
+        # Select file
+        filename = random.choice(files)
+        file_size = os.path.getsize(filename)
+        
+        # Determine operation type (read or write)
+        is_read = random.randrange(100) < read_pct
+        
+        # Determine access pattern (sequential or random)
+        is_sequential = random.randrange(100) < sequential_pct
+        
+        with open(filename, 'rb+') as f:
+            if is_sequential:
+                # Sequential access - start at beginning
+                position = 0
+                f.seek(position)
+            else:
+                # Random access - choose random position
+                position = random.randrange(0, file_size - 1024)
+                f.seek(position)
+            
+            if is_read:
+                # Read operation
+                data = f.read(1024)
+            else:
+                # Write operation
+                f.write(os.urandom(1024))
+        
+        operations += 1
+    
+    return operations
+
+
+
+-------------------------------------------------------------------------------------------
+
+Chapter 13 Benchmarking and Load Testing Essentials
+
+Page Number 264
+
+This function demonstrates a custom I/O pattern generator with controlled read/write ratios and access patterns.
+Creating Realistic Workload Mixes
+For testing that more closely approximates real-world scenarios, combine multiple load types:
+
+---------------------------------------------------------------------------------------------
+
+import multiprocessing
+import time
+
+
+def mixed_workload(cpu_intensity=0.7, memory_gb=1, io_ops=True,
+                  duration=300, directory="/tmp/test"):
+    """Run a mixed workload with CPU, memory, and I/O components"""
+    processes = []
+    
+    # Start CPU load on half of available cores
+    core_count = multiprocessing.cpu_count()
+    for i in range(core_count // 2):
+        p = multiprocessing.Process(
+            target=cpu_load, 
+            args=(duration, cpu_intensity)
+        )
+        p.start()
+        processes.append(p)
+    
+    # Start memory load
+    p = multiprocessing.Process(
+        target=memory_load, 
+        args=(duration, memory_gb * 1024)
+    )
+    p.start()
+    processes.append(p)
+    
+    # Start I/O load if requested
+    if io_ops:
+        p = multiprocessing.Process(
+            target=io_pattern_generator,
+            args=(directory, 10, 100, 70, 30, duration)
+        )
+        p.start()
+        processes.append(p)
+    
+    # Monitor system metrics during the test
+    start_time = time.time()
+    while time.time() < start_time + duration:
+        # Could add code here to collect system metrics
+        time.sleep(5)
+    
+    # Wait for all processes to complete
+    for p in processes:
+        p.join()
+
+
+
+--------------------------------------------------------------------------------------------
+
+Chapter 13 Benchmarking and Load Testing Essentials
+
+Page 265
+
+This script demonstrates a combined workload that exercises multiple system components simultaneously.
+Workload Orchestration
+For more complex testing scenarios, consider orchestration frameworks:
+
+
+--------------------------------------------------------------------------------------------
+
+import yaml
+import time
+import subprocess
+import multiprocessing
+
+
+def run_workload_scenario(scenario_file):
+    """
+    Run a multi-phase workload scenario defined in YAML
+    
+    Example YAML structure:
+    name: "Database server load test"
+    phases:
+      - name: "Warmup"
+        duration: 60
+        components:
+          - type: "cpu"
+            intensity: 0.3
+            cores: 2
+          - type: "memory"
+            size_gb: 1
+      - name: "Peak load"
+        duration: 300
+        components:
+          - type: "cpu"
+            intensity: 0.8
+            cores: 4
+          - type: "memory"
+            size_gb: 4
+          - type: "io"
+            read_pct: 70
+            file_count: 20
+    """
+    with open(scenario_file, 'r') as f:
+        scenario = yaml.safe_load(f)
+    
+    print(f"Running scenario: {scenario['name']}")
+    
+    for phase in scenario['phases']:
+        print(f"Starting phase: {phase['name']} (duration: {phase['duration']}s)")
+        processes = []
+        
+        # Launch each component
+        for component in phase['components']:
+            if component['type'] == 'cpu':
+                cores = component.get('cores', 1)
+                intensity = component.get('intensity', 0.5)
+                for _ in range(cores):
+                    p = multiprocessing.Process(
+                        target=cpu_load, 
+                        args=(phase['duration'], intensity)
+                    )
+                    p.start()
+                    processes.append(p)
+            
+            elif component['type'] == 'memory':
+                size_gb = component.get('size_gb', 1)
+                p = multiprocessing.Process(
+                    target=memory_load, 
+                    args=(phase['duration'], size_gb * 1024)
+                )
+                p.start()
+                processes.append(p)
+            
+            elif component['type'] == 'io':
+                p = multiprocessing.Process(
+                    target=io_pattern_generator,
+                    args=(
+                        "/tmp/test",
+                        component.get('file_count', 10),
+                        component.get('file_size_mb', 100),
+                        component.get('read_pct', 50),
+                        component.get('sequential_pct', 50),
+                        phase['duration']
+                    )
+                )
+                p.start()
+                processes.append(p)
+        
+        # Wait for phase to complete
+        for p in processes:
+            p.join()
+        
+        print(f"Completed phase: {phase['name']}")
+    
+    print(f"Scenario completed: {scenario['name']}")
+
+
+
+----------------------------------------------------------------------------------------------
+
+Chapter 15 Performance Tuning for Scalability
+
+Page Number 323
+
+collectd Configuration for Performance Monitoring
+The main configuration file is typically found at /etc/collectd/collectd.conf:
+
+
+----------------------------------------------------------------------------------------------
+
+# Basic collectd configuration for performance monitoring
+Hostname "server01"
+Interval 10  # Collection interval in seconds
+
+
+# Load plugins
+LoadPlugin cpu
+LoadPlugin memory
+LoadPlugin disk
+LoadPlugin interface
+LoadPlugin load
+LoadPlugin processes
+LoadPlugin tcpconns
+LoadPlugin vmem
+
+
+# CPU plugin configuration
+<Plugin cpu>
+  ReportByCpu true
+  ValuesPercentage true
+</Plugin>
+
+
+# Disk plugin configuration
+<Plugin disk>
+  Disk "/^[hs]d[a-z]/"
+  IgnoreSelected false
+</Plugin>
+
+
+# Output plugin - write to RRD files
+LoadPlugin rrdtool
+<Plugin rrdtool>
+  DataDir "/var/lib/collectd/rrd"
+  CacheTimeout 120
+  CacheFlush 900
+</Plugin>
+
+
+
+----------------------------------------------------------------------------------------------
+
+Chapter 17 Case Studies on Troubleshooting in Production
+
+Page Number 367
+
+Enhanced Monitoring: Implemented specialized monitoring for early detection of potential issues:
+
+---------------------------------------------------------------------------------------------
+
+# Created a custom monitoring script that watched for warning signs
+watch_for_driver_anomalies() {
+    # Check for increasing error counters
+    local prev_crc=0
+    local prev_rx_err=0
+    
+    while true; do
+        # Get current error counts
+        curr_crc=$(ethtool -S eth0 | grep crc_errors | awk '{print $2}')
+        curr_rx_err=$(ethtool -S eth0 | grep rx_err | awk '{print $2}')
+        
+        # Check for rapid increases
+        if (( curr_crc - prev_crc > 10 )); then
+            echo "WARNING: Rapid increase in CRC errors detected"
+            # Log additional diagnostic information
+            # ...
+        fi
+        
+        prev_crc=$curr_crc
+        prev_rx_err=$curr_rx_err
+        sleep 5
+    done
+}
+
+
+
+
+----------------------------------------------------------------------------------------------
